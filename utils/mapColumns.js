@@ -19,6 +19,8 @@ export const TARGET_FIELDS = [
   'payableEventCount',
   'impressions',
   'revenue',
+  'country',
+  'state',
 ]
 
 /** Assign metrics and dimensions before eventName so short header tokens cannot steal columns. */
@@ -33,6 +35,8 @@ const FIELD_ASSIGN_ORDER = [
   'payableEventCount',
   'impressions',
   'revenue',
+  'country',
+  'state',
   'eventName',
 ]
 
@@ -133,6 +137,22 @@ const SYNONYMS = {
     'usd revenue',
     'amount',
   ],
+  country: [
+    'country',
+    'country code',
+    'countrycode',
+    'country_code',
+    'geo country',
+    'geo code',
+  ],
+  state: [
+    'state',
+    'region',
+    'province',
+    'state region',
+    'state province',
+    'administrative area',
+  ],
 }
 
 function normalizeHeader(h) {
@@ -147,6 +167,9 @@ function normalizeHeader(h) {
 function bestFieldForHeader(headerNorm) {
   if (headerNorm === 'event') {
     return { field: 'eventName', score: 99 }
+  }
+  if (headerNorm === 'geo') {
+    return { field: 'country', score: 100 }
   }
 
   let bestField = null
@@ -313,6 +336,8 @@ export function buildRowFromMapping(rowObj, mapping) {
     payableEventCount: get('payableEventCount'),
     impressions: get('impressions'),
     revenue: get('revenue'),
+    country: get('country'),
+    state: get('state'),
   }
 }
 

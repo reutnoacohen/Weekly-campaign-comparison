@@ -20,6 +20,7 @@ import { parseUploadedFile } from './utils/parseCsvFile.js'
 import { BREAKDOWN_OPTIONS } from './utils/buildComparisonKey.js'
 import { exportRowsToCsv } from './utils/exportComparisonCsv.js'
 import { buildCampaignInsightsSummaries } from './utils/buildCampaignInsightsSummary.js'
+import { applyGeoFilter, uniqueSortedGeoValues } from './utils/geoFilters.js'
 import { MOCK_PREV, MOCK_CURR } from './data/mockNormalizedRows.js'
 
 const DEFAULT_FILTERS = {
@@ -28,6 +29,8 @@ const DEFAULT_FILTERS = {
   agency: '',
   attributionType: '',
   status: 'all',
+  country: [],
+  state: [],
 }
 
 const STATUS_FILTER_OPTIONS = [
@@ -39,23 +42,8 @@ function identityMapping() {
   return Object.fromEntries(TARGET_FIELDS.map((f) => [f, f]))
 }
 
-function mapDataset(normPrev, normCurr, prevMapPayable, currMapPayable) {
-  const hasPayableColumn = Boolean(prevMapPayable || currMapPayable)
-  const campaignPrev = aggregateByKey(normPrev, 'campaign')
-  const campaignCurr = aggregateByKey(normCurr, 'campaign')
-  const campaignRows = compareAggregates(campaignPrev, campaignCurr, {
-    level: 'campaign',
-    hasPayableColumn,
-  })
-
-  const mediaPrev = aggregateByKey(normPrev, 'campaign_media')
-  const mediaCurr = aggregateByKey(normCurr, 'campaign_media')
-  const mediaRows = compareAggregates(mediaPrev, mediaCurr, {
-    level: 'campaign_media',
-    hasPayableColumn,
-  })
-
-  return { campaignRows, mediaRows, hasPayableColumn }
+function hasPayableColumnFlag(prevMapPayable, currMapPayable) {
+  return Boolean(prevMapPayable || currMapPayable)
 }
 
 function passesFilters(row, filters, mode) {
@@ -173,11 +161,10 @@ export default function App() {
       )
       const prevPay = Boolean(prevFileState.mapping.payableEventCount)
       const currPay = Boolean(currFileState.mapping.payableEventCount)
-      const base = mapDataset(normPrev, normCurr, prevPay, currPay)
       setDataset({
-        ...base,
         normPrev,
         normCurr,
+        hasPayableColumn: hasPayableColumnFlag(prevPay, currPay),
       })
       setFilters(DEFAULT_FILTERS)
     } catch (e) {
@@ -209,36 +196,94 @@ export default function App() {
     const normPrev = normalizeDataset(mapRawRows(MOCK_PREV, mapping))
     const normCurr = normalizeDataset(mapRawRows(MOCK_CURR, mapping))
     setDataset({
-      ...mapDataset(normPrev, normCurr, true, true),
       normPrev,
       normCurr,
+      hasPayableColumn: hasPayableColumnFlag(true, true),
     })
     setFilters(DEFAULT_FILTERS)
   }, [])
 
+  const normPrevGeo = useMemo(
+    () => (dataset?.normPrev ? applyGeoFilter(dataset.normPrev, filters) : []),
+    [dataset?.normPrev, filters.country, filters.state],
+  )
+
+  const normCurrGeo = useMemo(
+    () => (dataset?.normCurr ? applyGeoFilter(dataset.normCurr, filters) : []),
+    [dataset?.normCurr, filters.country, filters.state],
+  )
+
+  const campaignRows = useMemo(() => {
+    if (!dataset) return []
+    const prev = aggregateByKey(normPrevGeo, 'campaign')
+    const curr = aggregateByKey(normCurrGeo, 'campaign')
+    return compareAggregates(prev, curr, {
+      level: 'campaign',
+      hasPayableColumn: dataset.hasPayableColumn,
+    })
+  }, [dataset, normPrevGeo, normCurrGeo])
+
+  const mediaRows = useMemo(() => {
+    if (!dataset) return []
+    const prev = aggregateByKey(normPrevGeo, 'campaign_media')
+    const curr = aggregateByKey(normCurrGeo, 'campaign_media')
+    return compareAggregates(prev, curr, {
+      level: 'campaign_media',
+      hasPayableColumn: dataset.hasPayableColumn,
+    })
+  }, [dataset, normPrevGeo, normCurrGeo])
+
   const breakdownRows = useMemo(() => {
-    if (!dataset?.normPrev || !breakdownLevel) return []
-    const prev = aggregateByKey(dataset.normPrev, breakdownLevel)
-    const curr = aggregateByKey(dataset.normCurr, breakdownLevel)
+    if (!dataset || !breakdownLevel) return []
+    const prev = aggregateByKey(normPrevGeo, breakdownLevel)
+    const curr = aggregateByKey(normCurrGeo, breakdownLevel)
     return compareAggregates(prev, curr, {
       level: breakdownLevel,
       hasPayableColumn: dataset.hasPayableColumn,
     })
-  }, [dataset, breakdownLevel])
+  }, [dataset, breakdownLevel, normPrevGeo, normCurrGeo])
+
+  const geoFilterMeta = useMemo(() => {
+    if (!dataset?.normPrev && !dataset?.normCurr) {
+      return {
+        countryOptions: [],
+        stateOptions: [],
+        showCountryFilter: false,
+        showStateFilter: false,
+      }
+    }
+    const allPrev = dataset.normPrev || []
+    const allCurr = dataset.normCurr || []
+    const countryOptions = uniqueSortedGeoValues(
+      [...allPrev, ...allCurr],
+      'country',
+    )
+    const stateOptions = uniqueSortedGeoValues(
+      [...allPrev, ...allCurr],
+      'state',
+    )
+    const prevMap = prevFileState?.mapping
+    const currMap = currFileState?.mapping
+    const mappedCountry = Boolean(prevMap?.country || currMap?.country)
+    const mappedState = Boolean(prevMap?.state || currMap?.state)
+    return {
+      countryOptions,
+      stateOptions,
+      showCountryFilter: mappedCountry || countryOptions.length > 0,
+      showStateFilter: mappedState || stateOptions.length > 0,
+    }
+  }, [dataset?.normPrev, dataset?.normCurr, prevFileState?.mapping, currFileState?.mapping])
 
   const filteredCampaignRows = useMemo(() => {
-    if (!dataset?.campaignRows) return []
-    return dataset.campaignRows.filter((r) =>
-      passesFilters(r, filters, 'campaign'),
-    )
-  }, [dataset, filters])
+    return campaignRows.filter((r) => passesFilters(r, filters, 'campaign'))
+  }, [campaignRows, filters])
 
   const filteredBreakdownRows = useMemo(() => {
     return breakdownRows.filter((r) => passesFilters(r, filters, 'breakdown'))
   }, [breakdownRows, filters])
 
   const summary = useMemo(() => {
-    if (!dataset?.campaignRows) {
+    if (!dataset) {
       return {
         improving: 0,
         declining: 0,
@@ -248,22 +293,22 @@ export default function App() {
         missingSources: 0,
       }
     }
-    const campFiltered = dataset.campaignRows.filter((r) =>
+    const campFiltered = campaignRows.filter((r) =>
       passesFilters(r, filters, 'campaign'),
     )
-    const mediaFiltered = (dataset.mediaRows || []).filter((r) =>
+    const mediaFiltered = mediaRows.filter((r) =>
       passesFilters(r, filters, 'breakdown'),
     )
     return summarizeCampaignResults(campFiltered, mediaFiltered)
-  }, [dataset, filters])
+  }, [dataset, campaignRows, mediaRows, filters])
 
   const campaignInsightsSummaries = useMemo(() => {
-    if (!dataset?.mediaRows || !filteredCampaignRows.length) return []
-    const mediaFiltered = dataset.mediaRows.filter((r) =>
+    if (!filteredCampaignRows.length) return []
+    const mediaFiltered = mediaRows.filter((r) =>
       passesFilters(r, filters, 'breakdown'),
     )
     return buildCampaignInsightsSummaries(filteredCampaignRows, mediaFiltered)
-  }, [dataset?.mediaRows, filteredCampaignRows, filters])
+  }, [mediaRows, filteredCampaignRows, filters])
 
   const exportCampaign = () => {
     if (!filteredCampaignRows.length) return
@@ -306,6 +351,10 @@ export default function App() {
               breakdownValue={breakdownLevel}
               onBreakdownChange={setBreakdownLevel}
               breakdownOptions={BREAKDOWN_OPTIONS}
+              countryOptions={geoFilterMeta.countryOptions}
+              stateOptions={geoFilterMeta.stateOptions}
+              showCountryFilter={geoFilterMeta.showCountryFilter}
+              showStateFilter={geoFilterMeta.showStateFilter}
             />
 
             <SummaryCards summary={summary} />
