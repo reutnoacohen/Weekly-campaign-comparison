@@ -10,8 +10,13 @@ import {
   mapRawRows,
   TARGET_FIELDS,
   autoDetectMapping,
-  isMappingReady,
+  isCompareReady,
+  DEFAULT_PAYABLE_CONFIG,
 } from './utils/mapColumns.js'
+import {
+  applyPayableBaselineToMappedRows,
+  isBaselineKpiEnabled,
+} from './utils/applyPayableBaseline.js'
 import { normalizeDataset } from './utils/normalizeData.js'
 import { aggregateByKey } from './utils/aggregateCampaignData.js'
 import { compareAggregates, STATUS } from './utils/compareRows.js'
@@ -21,6 +26,7 @@ import { BREAKDOWN_OPTIONS } from './utils/buildComparisonKey.js'
 import { exportRowsToCsv } from './utils/exportComparisonCsv.js'
 import { buildCampaignInsightsSummaries } from './utils/buildCampaignInsightsSummary.js'
 import { applyGeoFilter, uniqueSortedGeoValues } from './utils/geoFilters.js'
+import { buildAggregateEventsNarrative, formatEventChangeCsv } from './utils/kpiDisplay.js'
 import { MOCK_PREV, MOCK_CURR } from './data/mockNormalizedRows.js'
 
 const DEFAULT_FILTERS = {
@@ -31,6 +37,8 @@ const DEFAULT_FILTERS = {
   status: 'all',
   country: [],
   state: [],
+  /** When true, country/state selections restrict rows; when false, ignore geo selections */
+  useGeo: true,
 }
 
 const STATUS_FILTER_OPTIONS = [
@@ -42,8 +50,12 @@ function identityMapping() {
   return Object.fromEntries(TARGET_FIELDS.map((f) => [f, f]))
 }
 
-function hasPayableColumnFlag(prevMapPayable, currMapPayable) {
-  return Boolean(prevMapPayable || currMapPayable)
+function hasPayableKpiFlag(prevMap, currMap, prevCfg, currCfg) {
+  return (
+    Boolean(prevMap?.payableEventCount || currMap?.payableEventCount) ||
+    isBaselineKpiEnabled(prevMap, prevCfg ?? DEFAULT_PAYABLE_CONFIG) ||
+    isBaselineKpiEnabled(currMap, currCfg ?? DEFAULT_PAYABLE_CONFIG)
+  )
 }
 
 function passesFilters(row, filters, mode) {
@@ -94,7 +106,8 @@ export default function App() {
         rows: parsed.rows,
         mapping,
         needsManual,
-        ready: isMappingReady(mapping, parsed.rows),
+        payableConfig: { ...DEFAULT_PAYABLE_CONFIG },
+        ready: isCompareReady(mapping, parsed.rows, DEFAULT_PAYABLE_CONFIG),
       })
     } catch (e) {
       setError(e?.message || 'Could not parse previous week file.')
@@ -117,7 +130,8 @@ export default function App() {
         rows: parsed.rows,
         mapping,
         needsManual,
-        ready: isMappingReady(mapping, parsed.rows),
+        payableConfig: { ...DEFAULT_PAYABLE_CONFIG },
+        ready: isCompareReady(mapping, parsed.rows, DEFAULT_PAYABLE_CONFIG),
       })
     } catch (e) {
       setError(e?.message || 'Could not parse current week file.')
@@ -131,7 +145,11 @@ export default function App() {
         ? {
             ...s,
             mapping,
-            ready: isMappingReady(mapping, s.rows),
+            ready: isCompareReady(
+              mapping,
+              s.rows,
+              s.payableConfig ?? DEFAULT_PAYABLE_CONFIG,
+            ),
           }
         : s,
     )
@@ -143,7 +161,43 @@ export default function App() {
         ? {
             ...s,
             mapping,
-            ready: isMappingReady(mapping, s.rows),
+            ready: isCompareReady(
+              mapping,
+              s.rows,
+              s.payableConfig ?? DEFAULT_PAYABLE_CONFIG,
+            ),
+          }
+        : s,
+    )
+  }, [])
+
+  const onPrevPayableConfig = useCallback((payableConfig) => {
+    setPrevFileState((s) =>
+      s
+        ? {
+            ...s,
+            payableConfig,
+            ready: isCompareReady(
+              s.mapping,
+              s.rows,
+              payableConfig,
+            ),
+          }
+        : s,
+    )
+  }, [])
+
+  const onCurrPayableConfig = useCallback((payableConfig) => {
+    setCurrFileState((s) =>
+      s
+        ? {
+            ...s,
+            payableConfig,
+            ready: isCompareReady(
+              s.mapping,
+              s.rows,
+              payableConfig,
+            ),
           }
         : s,
     )
@@ -153,18 +207,35 @@ export default function App() {
     if (!prevFileState?.ready || !currFileState?.ready) return
     setBusy(true)
     try {
-      const normPrev = normalizeDataset(
-        mapRawRows(prevFileState.rows, prevFileState.mapping),
+      const pCfg = prevFileState.payableConfig ?? DEFAULT_PAYABLE_CONFIG
+      const cCfg = currFileState.payableConfig ?? DEFAULT_PAYABLE_CONFIG
+      const mappedPrev = mapRawRows(prevFileState.rows, prevFileState.mapping)
+      const mappedCurr = mapRawRows(currFileState.rows, currFileState.mapping)
+      const withPayPrev = applyPayableBaselineToMappedRows(
+        mappedPrev,
+        prevFileState.mapping,
+        pCfg,
       )
-      const normCurr = normalizeDataset(
-        mapRawRows(currFileState.rows, currFileState.mapping),
+      const withPayCurr = applyPayableBaselineToMappedRows(
+        mappedCurr,
+        currFileState.mapping,
+        cCfg,
       )
-      const prevPay = Boolean(prevFileState.mapping.payableEventCount)
-      const currPay = Boolean(currFileState.mapping.payableEventCount)
+      const normPrev = normalizeDataset(withPayPrev)
+      const normCurr = normalizeDataset(withPayCurr)
+      const usesPayableBaseline =
+        isBaselineKpiEnabled(prevFileState.mapping, pCfg) ||
+        isBaselineKpiEnabled(currFileState.mapping, cCfg)
       setDataset({
         normPrev,
         normCurr,
-        hasPayableColumn: hasPayableColumnFlag(prevPay, currPay),
+        hasPayableColumn: hasPayableKpiFlag(
+          prevFileState.mapping,
+          currFileState.mapping,
+          pCfg,
+          cCfg,
+        ),
+        usesPayableBaseline,
       })
       setFilters(DEFAULT_FILTERS)
     } catch (e) {
@@ -182,7 +253,8 @@ export default function App() {
       rows: MOCK_PREV,
       mapping,
       needsManual: false,
-      ready: isMappingReady(mapping, MOCK_PREV),
+      payableConfig: { ...DEFAULT_PAYABLE_CONFIG },
+      ready: isCompareReady(mapping, MOCK_PREV, DEFAULT_PAYABLE_CONFIG),
     })
     setCurrFileState({
       fileName: 'mock-current.csv',
@@ -190,27 +262,40 @@ export default function App() {
       rows: MOCK_CURR,
       mapping,
       needsManual: false,
-      ready: isMappingReady(mapping, MOCK_CURR),
+      payableConfig: { ...DEFAULT_PAYABLE_CONFIG },
+      ready: isCompareReady(mapping, MOCK_CURR, DEFAULT_PAYABLE_CONFIG),
     })
     setError('')
-    const normPrev = normalizeDataset(mapRawRows(MOCK_PREV, mapping))
-    const normCurr = normalizeDataset(mapRawRows(MOCK_CURR, mapping))
+    const pCfg = DEFAULT_PAYABLE_CONFIG
+    const withPrev = applyPayableBaselineToMappedRows(
+      mapRawRows(MOCK_PREV, mapping),
+      mapping,
+      pCfg,
+    )
+    const withCurr = applyPayableBaselineToMappedRows(
+      mapRawRows(MOCK_CURR, mapping),
+      mapping,
+      pCfg,
+    )
+    const normPrev = normalizeDataset(withPrev)
+    const normCurr = normalizeDataset(withCurr)
     setDataset({
       normPrev,
       normCurr,
-      hasPayableColumn: hasPayableColumnFlag(true, true),
+      hasPayableColumn: hasPayableKpiFlag(mapping, mapping, pCfg, pCfg),
+      usesPayableBaseline: false,
     })
     setFilters(DEFAULT_FILTERS)
   }, [])
 
   const normPrevGeo = useMemo(
     () => (dataset?.normPrev ? applyGeoFilter(dataset.normPrev, filters) : []),
-    [dataset?.normPrev, filters.country, filters.state],
+    [dataset?.normPrev, filters.country, filters.state, filters.useGeo],
   )
 
   const normCurrGeo = useMemo(
     () => (dataset?.normCurr ? applyGeoFilter(dataset.normCurr, filters) : []),
-    [dataset?.normCurr, filters.country, filters.state],
+    [dataset?.normCurr, filters.country, filters.state, filters.useGeo],
   )
 
   const campaignRows = useMemo(() => {
@@ -229,6 +314,16 @@ export default function App() {
     const curr = aggregateByKey(normCurrGeo, 'campaign_media')
     return compareAggregates(prev, curr, {
       level: 'campaign_media',
+      hasPayableColumn: dataset.hasPayableColumn,
+    })
+  }, [dataset, normPrevGeo, normCurrGeo])
+
+  const mediaDetailRows = useMemo(() => {
+    if (!dataset) return []
+    const prev = aggregateByKey(normPrevGeo, 'campaign_media_detail')
+    const curr = aggregateByKey(normCurrGeo, 'campaign_media_detail')
+    return compareAggregates(prev, curr, {
+      level: 'campaign_media_detail',
       hasPayableColumn: dataset.hasPayableColumn,
     })
   }, [dataset, normPrevGeo, normCurrGeo])
@@ -302,13 +397,42 @@ export default function App() {
     return summarizeCampaignResults(campFiltered, mediaFiltered)
   }, [dataset, campaignRows, mediaRows, filters])
 
+  const kpiNarrative = useMemo(() => {
+    if (!dataset) return ''
+    const camp = campaignRows.filter((r) =>
+      passesFilters(r, filters, 'campaign'),
+    )
+    const med = mediaRows.filter((r) =>
+      passesFilters(r, filters, 'breakdown'),
+    )
+    if (!camp.length) return ''
+    return buildAggregateEventsNarrative(camp, med)
+  }, [dataset, campaignRows, mediaRows, filters])
+
   const campaignInsightsSummaries = useMemo(() => {
     if (!filteredCampaignRows.length) return []
     const mediaFiltered = mediaRows.filter((r) =>
       passesFilters(r, filters, 'breakdown'),
     )
-    return buildCampaignInsightsSummaries(filteredCampaignRows, mediaFiltered)
-  }, [mediaRows, filteredCampaignRows, filters])
+    const hasSubSourceColumn = Boolean(
+      prevFileState?.mapping?.sourceDetail || currFileState?.mapping?.sourceDetail,
+    )
+    const detailFiltered = hasSubSourceColumn
+      ? mediaDetailRows.filter((r) => passesFilters(r, filters, 'breakdown'))
+      : []
+    return buildCampaignInsightsSummaries(
+      filteredCampaignRows,
+      mediaFiltered,
+      detailFiltered,
+    )
+  }, [
+    mediaRows,
+    mediaDetailRows,
+    filteredCampaignRows,
+    filters,
+    prevFileState?.mapping?.sourceDetail,
+    currFileState?.mapping?.sourceDetail,
+  ])
 
   const exportCampaign = () => {
     if (!filteredCampaignRows.length) return
@@ -331,6 +455,8 @@ export default function App() {
           onCurrFile={handleCurrFile}
           onPrevMapping={onPrevMapping}
           onCurrMapping={onCurrMapping}
+          onPrevPayableConfig={onPrevPayableConfig}
+          onCurrPayableConfig={onCurrPayableConfig}
           onCompare={runComparison}
           onLoadMock={loadMock}
           comparing={busy}
@@ -344,6 +470,12 @@ export default function App() {
 
         {dataset && (
           <>
+            {dataset.usesPayableBaseline && (
+              <div className="rounded-md border border-sky-200 bg-sky-50 px-4 py-2 text-sm text-sky-950">
+                Payable events are calculated using baseline logic
+              </div>
+            )}
+
             <FiltersBar
               filters={filters}
               onChange={setFilters}
@@ -357,15 +489,30 @@ export default function App() {
               showStateFilter={geoFilterMeta.showStateFilter}
             />
 
-            <SummaryCards summary={summary} />
+            <SummaryCards
+              summary={summary}
+              narrative={kpiNarrative}
+              usesPayableBaseline={dataset.usesPayableBaseline}
+              hasPayableKpi={dataset.hasPayableColumn}
+            />
 
-            <CampaignInsightsSummary summaries={campaignInsightsSummaries} />
+            <CampaignInsightsSummary
+              summaries={campaignInsightsSummaries}
+              usesPayableBaseline={dataset.usesPayableBaseline}
+              hasPayableKpi={dataset.hasPayableColumn}
+            />
 
             <section className="space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-lg font-semibold text-slate-900">
-                  Campaign summary
-                </h2>
+                <div>
+                  <h2 className="text-lg font-semibold text-slate-900">
+                    Campaign summary
+                  </h2>
+                  <p className="mt-0.5 text-xs text-slate-600">
+                    Each row compares <span className="font-medium">events</span> between weeks (same
+                    definition as the KPI line above).
+                  </p>
+                </div>
                 <button
                   type="button"
                   onClick={exportCampaign}
@@ -378,6 +525,7 @@ export default function App() {
               <CampaignSummaryTable
                 rows={filteredCampaignRows}
                 hasPayableColumn={dataset.hasPayableColumn}
+                usesPayableBaseline={dataset.usesPayableBaseline}
               />
             </section>
 
@@ -396,6 +544,7 @@ export default function App() {
               rows={filteredBreakdownRows}
               breakdownLevel={breakdownLevel}
               hasPayableColumn={dataset.hasPayableColumn}
+              usesPayableBaseline={dataset.usesPayableBaseline}
             />
           </>
         )}
@@ -406,10 +555,12 @@ export default function App() {
 
 const CAMP_COLS = [
   { header: 'Campaign', accessor: (r) => r.display.campaign },
-  { header: 'Prev primary KPI', accessor: (r) => r.prevPayable },
-  { header: 'Current primary KPI', accessor: (r) => r.currPayable },
-  { header: 'Prev rate', accessor: (r) => r.prevRate },
-  { header: 'Current rate', accessor: (r) => r.currRate },
+  {
+    header: 'Events (week over week)',
+    accessor: (r) => formatEventChangeCsv(r.prevPayable, r.currPayable),
+  },
+  { header: 'Event rate previous week', accessor: (r) => r.prevRate },
+  { header: 'Event rate current week', accessor: (r) => r.currRate },
   { header: 'Status', accessor: (r) => r.status },
   { header: 'Insight', accessor: (r) => r.insight },
 ]
@@ -417,11 +568,13 @@ const CAMP_COLS = [
 function BR_COLS(level) {
   return [
     { header: 'Campaign', accessor: (r) => r.display.campaign },
-    { header: 'Breakdown', accessor: (r) => detailCell(level, r) },
-    { header: 'Prev primary KPI', accessor: (r) => r.prevPayable },
-    { header: 'Current primary KPI', accessor: (r) => r.currPayable },
-    { header: 'Prev rate', accessor: (r) => r.prevRate },
-    { header: 'Current rate', accessor: (r) => r.currRate },
+    { header: 'Source / detail', accessor: (r) => detailCell(level, r) },
+    {
+      header: 'Events (week over week)',
+      accessor: (r) => formatEventChangeCsv(r.prevPayable, r.currPayable),
+    },
+    { header: 'Event rate previous week', accessor: (r) => r.prevRate },
+    { header: 'Event rate current week', accessor: (r) => r.currRate },
     { header: 'Status', accessor: (r) => r.status },
     { header: 'Insight', accessor: (r) => r.insight },
   ]
@@ -430,6 +583,9 @@ function BR_COLS(level) {
 function detailCell(level, row) {
   if (level === 'campaign') return ''
   if (level === 'campaign_media') return row.display.mediaSource
+  if (level === 'campaign_media_detail') {
+    return [row.display.mediaSource, row.display.sourceDetail].filter(Boolean).join(' | ')
+  }
   if (level === 'campaign_media_agency') {
     return [row.display.mediaSource, row.display.agency].filter(Boolean).join(' | ')
   }

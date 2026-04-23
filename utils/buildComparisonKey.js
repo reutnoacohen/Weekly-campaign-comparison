@@ -1,4 +1,4 @@
-/** @typedef {'campaign' | 'campaign_media' | 'campaign_media_agency' | 'campaign_attribution' | 'campaign_event'} BreakdownLevel */
+/** @typedef {'campaign' | 'campaign_media' | 'campaign_media_detail' | 'campaign_media_agency' | 'campaign_attribution' | 'campaign_event'} BreakdownLevel */
 
 const NIL = '__null__'
 
@@ -14,6 +14,7 @@ function s(v) {
 export function buildComparisonKey(row, level) {
   const campaign = s(row.campaignName)
   const media = s(row.mediaSource)
+  const detail = s(row.sourceDetail)
   const agency = s(row.agency)
   const attr = s(row.attributionType)
   const event = s(row.eventName)
@@ -23,6 +24,8 @@ export function buildComparisonKey(row, level) {
       return campaign
     case 'campaign_media':
       return `${campaign}|||${media}`
+    case 'campaign_media_detail':
+      return `${campaign}|||${media}|||${detail}`
     case 'campaign_media_agency':
       return `${campaign}|||${media}|||${agency}`
     case 'campaign_attribution':
@@ -34,6 +37,15 @@ export function buildComparisonKey(row, level) {
   }
 }
 
+const NIL_DISPLAY = {
+  campaign: null,
+  mediaSource: null,
+  sourceDetail: null,
+  agency: null,
+  attributionType: null,
+  eventName: null,
+}
+
 /**
  * Parse key parts for display (best-effort).
  * @param {string} key
@@ -41,58 +53,60 @@ export function buildComparisonKey(row, level) {
  */
 export function parseKeyForDisplay(key, level) {
   if (level === 'campaign') {
-    return { campaign: key === NIL ? null : key, mediaSource: null, agency: null, attributionType: null, eventName: null }
+    return {
+      ...NIL_DISPLAY,
+      campaign: key === NIL ? null : key,
+    }
   }
   const parts = String(key).split('|||')
   if (level === 'campaign_media') {
     return {
+      ...NIL_DISPLAY,
       campaign: parts[0] === NIL ? null : parts[0],
       mediaSource: parts[1] === NIL ? null : parts[1],
-      agency: null,
-      attributionType: null,
-      eventName: null,
+    }
+  }
+  if (level === 'campaign_media_detail') {
+    return {
+      ...NIL_DISPLAY,
+      campaign: parts[0] === NIL ? null : parts[0],
+      mediaSource: parts[1] === NIL ? null : parts[1],
+      sourceDetail: parts[2] === NIL ? null : parts[2],
     }
   }
   if (level === 'campaign_media_agency') {
     return {
+      ...NIL_DISPLAY,
       campaign: parts[0] === NIL ? null : parts[0],
       mediaSource: parts[1] === NIL ? null : parts[1],
       agency: parts[2] === NIL ? null : parts[2],
-      attributionType: null,
-      eventName: null,
     }
   }
   if (level === 'campaign_attribution') {
     return {
+      ...NIL_DISPLAY,
       campaign: parts[0] === NIL ? null : parts[0],
-      mediaSource: null,
-      agency: null,
       attributionType: parts[1] === NIL ? null : parts[1],
-      eventName: null,
     }
   }
   if (level === 'campaign_event') {
     return {
+      ...NIL_DISPLAY,
       campaign: parts[0] === NIL ? null : parts[0],
-      mediaSource: null,
-      agency: null,
-      attributionType: null,
       eventName: parts[1] === NIL ? null : parts[1],
     }
   }
-  return {
-    campaign: null,
-    mediaSource: null,
-    agency: null,
-    attributionType: null,
-    eventName: null,
-  }
+  return { ...NIL_DISPLAY }
 }
 
 export const BREAKDOWN_OPTIONS = [
-  { value: 'campaign', label: 'Campaign Overall' },
-  { value: 'campaign_media', label: 'Campaign + Media Source' },
-  { value: 'campaign_media_agency', label: 'Campaign + Media Source + Agency' },
-  { value: 'campaign_attribution', label: 'Campaign + Attribution Type' },
-  { value: 'campaign_event', label: 'Campaign + Event Name' },
+  { value: 'campaign', label: 'Campaign overall' },
+  { value: 'campaign_media', label: 'Main media source (aggregated)' },
+  {
+    value: 'campaign_media_detail',
+    label: 'Main media + sub-source / detail',
+  },
+  { value: 'campaign_media_agency', label: 'Campaign + media + agency' },
+  { value: 'campaign_attribution', label: 'Campaign + attribution type' },
+  { value: 'campaign_event', label: 'Campaign + event name' },
 ]

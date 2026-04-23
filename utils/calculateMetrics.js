@@ -1,8 +1,12 @@
 /**
- * Primary KPI: payable events, else event count.
+ * Primary KPI (single value per row for aggregation and rates).
+ * Pipeline priority (highest first):
+ * 1. payableEventCount from baseline logic (0/1) when that mode is active
+ * 2. payableEventCount from a mapped count column
+ * 3. eventCount, only when no payable is present on the row
  */
 export function primaryEventValue(row) {
-  if (row.payableEventCount !== null && row.payableEventCount !== undefined) {
+  if (row.payableEventCount != null && row.payableEventCount !== undefined) {
     return row.payableEventCount
   }
   if (row.eventCount != null && row.eventCount !== undefined) {

@@ -1,7 +1,9 @@
 import StatusBadge from './StatusBadge.jsx'
-import { formatCount, formatPercent } from '../utils/formatDisplay.js'
+import { formatPercent } from '../utils/formatDisplay.js'
 import { annotateInsight } from '../utils/generateInsights.js'
 import { BREAKDOWN_OPTIONS } from '../utils/buildComparisonKey.js'
+import KpiEventBlock, { KpiDefinitionBanner } from './KpiEventBlock.jsx'
+import { getKpiDefinitionLine } from '../utils/kpiDisplay.js'
 
 function breakdownLabel(level) {
   const o = BREAKDOWN_OPTIONS.find((x) => x.value === level)
@@ -15,6 +17,17 @@ function secondaryColumns(level, row) {
   if (level === 'campaign_media') {
     return row.display.mediaSource || '—'
   }
+  if (level === 'campaign_media_detail') {
+    const m = row.display.mediaSource || '—'
+    const d = row.display.sourceDetail || '—'
+    return (
+      <span title={`${m} — ${d}`}>
+        <span className="font-medium text-slate-800">{m}</span>
+        <span className="text-slate-400"> → </span>
+        <span className="text-slate-700">{d}</span>
+      </span>
+    )
+  }
   if (level === 'campaign_media_agency') {
     return [row.display.mediaSource, row.display.agency].filter(Boolean).join(' · ') || '—'
   }
@@ -27,12 +40,20 @@ function secondaryColumns(level, row) {
   return '—'
 }
 
-export default function BreakdownTable({ rows, breakdownLevel, hasPayableColumn }) {
+export default function BreakdownTable({
+  rows,
+  breakdownLevel,
+  hasPayableColumn,
+  usesPayableBaseline,
+}) {
+  const kpiLine = getKpiDefinitionLine(usesPayableBaseline, hasPayableColumn)
+
   return (
     <div className="space-y-2">
       <h2 className="text-lg font-semibold text-slate-900">
         Breakdown — {breakdownLabel(breakdownLevel)}
       </h2>
+      <KpiDefinitionBanner line={kpiLine} />
       <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
         <table className="min-w-full border-collapse text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-600">
@@ -41,19 +62,16 @@ export default function BreakdownTable({ rows, breakdownLevel, hasPayableColumn 
                 Campaign
               </th>
               <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">
-                Detail
+                Source / detail
+              </th>
+              <th className="min-w-[220px] border-b border-slate-200 px-3 py-2">
+                Events (week over week)
               </th>
               <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2 text-right">
-                Prev primary
+                Event rate, previous week
               </th>
               <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2 text-right">
-                Current primary
-              </th>
-              <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2 text-right">
-                Prev rate
-              </th>
-              <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2 text-right">
-                Current rate
+                Event rate, current week
               </th>
               <th className="whitespace-nowrap border-b border-slate-200 px-3 py-2">
                 Status
@@ -69,28 +87,25 @@ export default function BreakdownTable({ rows, breakdownLevel, hasPayableColumn 
                 key={row.key}
                 className="border-b border-slate-100 odd:bg-white even:bg-slate-50/60"
               >
-                <td className="px-3 py-2 font-medium text-slate-900">
+                <td className="px-3 py-2 align-top font-medium text-slate-900">
                   {row.display.campaign || '—'}
                 </td>
-                <td className="max-w-xs truncate px-3 py-2 text-slate-700">
+                <td className="max-w-xs truncate px-3 py-2 align-top text-slate-700">
                   {secondaryColumns(breakdownLevel, row)}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-700">
-                  {formatCount(row.prevPayable)}
+                <td className="px-3 py-2 align-top">
+                  <KpiEventBlock prev={row.prevPayable} curr={row.currPayable} />
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-700">
-                  {formatCount(row.currPayable)}
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-600">
+                <td className="px-3 py-2 align-top text-right tabular-nums text-slate-600">
                   {formatPercent(row.prevRate)}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums text-slate-600">
+                <td className="px-3 py-2 align-top text-right tabular-nums text-slate-600">
                   {formatPercent(row.currRate)}
                 </td>
-                <td className="px-3 py-2">
+                <td className="px-3 py-2 align-top">
                   <StatusBadge status={row.status} />
                 </td>
-                <td className="px-3 py-2 text-xs leading-snug text-slate-600">
+                <td className="px-3 py-2 align-top text-xs leading-snug text-slate-600">
                   {annotateInsight(row, { hasPayableColumn })}
                 </td>
               </tr>

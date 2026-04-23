@@ -21,3 +21,16 @@ export function getColumnStats(rawRows, sourceColumnKey) {
     distinct: new Set(vals).size,
   }
 }
+
+/** Distinct non-empty string values from a column (for event name pickers, etc.) */
+export function getDistinctStringValues(rawRows, sourceColumnKey) {
+  if (!Array.isArray(rawRows) || !sourceColumnKey) return []
+  const s = new Set()
+  for (const row of rawRows) {
+    if (!row || typeof row !== 'object') continue
+    if (!Object.prototype.hasOwnProperty.call(row, sourceColumnKey)) continue
+    const v = row[sourceColumnKey]
+    if (v != null && String(v).trim() !== '') s.add(String(v).trim())
+  }
+  return [...s].sort((a, b) => a.localeCompare(b))
+}

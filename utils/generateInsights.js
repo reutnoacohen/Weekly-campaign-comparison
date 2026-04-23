@@ -7,7 +7,7 @@ export function annotateInsight(row, { hasPayableColumn }) {
   let text = row.insight || ''
   if (!hasPayableColumn) {
     text +=
-      ' KPI uses total events where payable events are not mapped — add payable mapping when available.'
+      ' This row uses total event counts where payable events are not mapped — add payable mapping when available.'
   }
   return text.trim()
 }

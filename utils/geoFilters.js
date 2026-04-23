@@ -5,10 +5,11 @@
 
 /**
  * @param {object[]} rows
- * @param {{ country?: string[], state?: string[] }} filters
+ * @param {{ country?: string[], state?: string[], useGeo?: boolean }} filters
  */
 export function applyGeoFilter(rows, filters) {
   if (!rows?.length) return rows || []
+  if (filters?.useGeo === false) return rows
   const countries = filters?.country
   const states = filters?.state
   if (!countries?.length && !states?.length) return rows

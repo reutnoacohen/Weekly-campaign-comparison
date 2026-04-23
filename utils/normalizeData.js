@@ -19,7 +19,7 @@ function trimString(v) {
   return t
 }
 
-function parseNumber(v) {
+export function parseNumber(v) {
   if (v == null || v === '') return null
   if (typeof v === 'number') {
     return Number.isFinite(v) ? v : null
@@ -56,11 +56,18 @@ export function normalizeRow(raw) {
   const payableEventCount = parseNumber(raw.payableEventCount)
   const impressions = parseNumber(raw.impressions)
   const revenue = parseNumber(raw.revenue)
+  const eventRevenue = parseNumber(raw.eventRevenue)
 
   const hasAnyNumber =
-    [clicks, installs, eventCount, payableEventCount, impressions, revenue].some(
-      (n) => n != null && n !== 0,
-    )
+    [
+      clicks,
+      installs,
+      eventCount,
+      payableEventCount,
+      impressions,
+      revenue,
+      eventRevenue,
+    ].some((n) => n != null && n !== 0)
 
   if (!campaignName) return null
   if (!hasAnyNumber) return null
@@ -68,6 +75,7 @@ export function normalizeRow(raw) {
   return {
     campaignName,
     mediaSource: trimString(raw.mediaSource),
+    sourceDetail: trimString(raw.sourceDetail),
     agency: trimString(raw.agency),
     eventName: trimString(raw.eventName),
     attributionType: trimString(raw.attributionType),
@@ -79,6 +87,7 @@ export function normalizeRow(raw) {
     payableEventCount,
     impressions,
     revenue,
+    eventRevenue,
   }
 }
 
@@ -89,6 +98,7 @@ export function normalizeDataset(rawRows) {
     const n = normalizeRow({
       campaignName: r.campaignName,
       mediaSource: r.mediaSource,
+      sourceDetail: r.sourceDetail,
       agency: r.agency,
       eventName: r.eventName,
       attributionType: r.attributionType,
@@ -100,6 +110,7 @@ export function normalizeDataset(rawRows) {
       payableEventCount: r.payableEventCount,
       impressions: r.impressions,
       revenue: r.revenue,
+      eventRevenue: r.eventRevenue,
     })
     if (n) out.push(n)
   }

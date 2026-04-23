@@ -64,6 +64,7 @@ export function aggregateByKey(rows, level) {
       rows: groupRows,
       campaignName: first.campaignName ?? null,
       mediaSource: first.mediaSource ?? null,
+      sourceDetail: first.sourceDetail ?? null,
       agency: first.agency ?? null,
       attributionType: first.attributionType ?? null,
       eventName: first.eventName ?? null,

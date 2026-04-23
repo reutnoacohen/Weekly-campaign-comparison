@@ -1,6 +1,10 @@
-import { useId } from 'react'
-import { TARGET_FIELDS, getMappingValidationIssues } from '../utils/mapColumns.js'
-import { getColumnStats } from '../utils/columnStats.js'
+import { useId, useMemo } from 'react'
+import {
+  TARGET_FIELDS,
+  getMappingValidationIssues,
+} from '../utils/mapColumns.js'
+import { getColumnStats, getDistinctStringValues } from '../utils/columnStats.js'
+import { isBaselineKpiEnabled } from '../utils/applyPayableBaseline.js'
 
 const LABEL = 'mb-1 block text-xs font-medium text-slate-600'
 const SELECT =
@@ -48,19 +52,111 @@ function EventCountMappingHint({ rawRows, mapping }) {
   )
 }
 
-function PayableFallbackNotice({ prevState, currState }) {
-  const bothReady =
-    prevState?.mapping &&
-    currState?.mapping &&
-    prevState.headers?.length &&
-    currState.headers?.length
-  if (!bothReady) return null
-  const noPayable =
-    !prevState.mapping.payableEventCount && !currState.mapping.payableEventCount
-  if (!noPayable) return null
+function PayableKpiNotices({ prevState, currState }) {
+  if (!prevState?.mapping || !currState?.mapping) return null
+  const prevMap = prevState.mapping
+  const currMap = currState.mapping
+  const prevCfg = prevState.payableConfig
+  const currCfg = currState.payableConfig
+  const hasMappedPayable = Boolean(
+    prevMap.payableEventCount || currMap.payableEventCount,
+  )
+  const willUseBaseline =
+    isBaselineKpiEnabled(prevMap, prevCfg) || isBaselineKpiEnabled(currMap, currCfg)
+
+  if (willUseBaseline) {
+    return (
+      <div className="rounded-md border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950">
+        Payable events will be calculated using baseline logic (where enabled per file).
+      </div>
+    )
+  }
+  if (hasMappedPayable) return null
   return (
     <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
       Payable events not mapped — using total events as fallback KPI.
+    </div>
+  )
+}
+
+function PayableBaselineConfig({
+  title,
+  rawRows,
+  mapping,
+  payableConfig,
+  onChange,
+}) {
+  const listId = useId()
+  const eventNames = useMemo(
+    () => getDistinctStringValues(rawRows, mapping?.eventName),
+    [rawRows, mapping?.eventName],
+  )
+  const columnMapped = Boolean(mapping?.payableEventCount)
+  const canToggle = !columnMapped
+  const showFields = canToggle && payableConfig?.useBaseline
+
+  return (
+    <div className="mt-3 rounded-md border border-slate-200 bg-white p-3">
+      <h4 className="mb-2 text-xs font-medium text-slate-800">{title}</h4>
+      {columnMapped && (
+        <p className="mb-2 text-[10px] text-slate-500">
+          Payable count column is mapped — baseline logic is not used.
+        </p>
+      )}
+      <label className="flex cursor-pointer items-start gap-2 text-xs text-slate-700">
+        <input
+          type="checkbox"
+          className="mt-0.5 rounded border-slate-300 text-indigo-600"
+          checked={Boolean(payableConfig?.useBaseline) && canToggle}
+          disabled={!canToggle}
+          onChange={(e) =>
+            onChange({ ...payableConfig, useBaseline: e.target.checked })
+          }
+        />
+        <span>Use baseline logic to calculate payable events</span>
+      </label>
+      {showFields && (
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          <label className="flex flex-col gap-0.5 text-xs font-medium text-slate-600">
+            Primary payable event name
+            <input
+              className={SELECT}
+              list={listId}
+              value={payableConfig?.payableEventName ?? ''}
+              onChange={(e) =>
+                onChange({ ...payableConfig, payableEventName: e.target.value })
+              }
+              placeholder="Match exact event name"
+            />
+            <datalist id={listId}>
+              {eventNames.map((n) => (
+                <option key={n} value={n} />
+              ))}
+            </datalist>
+            {mapping?.eventName ? (
+              <p className="font-normal text-[10px] text-slate-500">
+                Suggestions from Event Name column
+              </p>
+            ) : null}
+          </label>
+          <label className="flex flex-col gap-0.5 text-xs font-medium text-slate-600">
+            Payable revenue baseline
+            <input
+              type="text"
+              inputMode="decimal"
+              className={SELECT}
+              value={payableConfig?.revenueBaseline ?? ''}
+              onChange={(e) =>
+                onChange({ ...payableConfig, revenueBaseline: e.target.value })
+              }
+              placeholder="e.g. 20"
+            />
+            <p className="font-normal text-[10px] text-slate-500">
+              Event revenue ≥ this value counts as 1 payable event
+            </p>
+          </label>
+        </div>
+      )}
     </div>
   )
 }
@@ -121,6 +217,8 @@ export default function FileUploadSection({
   onCurrFile,
   onPrevMapping,
   onCurrMapping,
+  onPrevPayableConfig,
+  onCurrPayableConfig,
   onCompare,
   onLoadMock,
   comparing,
@@ -178,27 +276,45 @@ export default function FileUploadSection({
         </div>
       </div>
 
-      <PayableFallbackNotice prevState={prevState} currState={currState} />
+      <PayableKpiNotices prevState={prevState} currState={currState} />
 
       {prevState?.headers && (
-        <ColumnMappingForm
-          title="Previous week — column mapping"
-          headers={prevState.headers}
-          mapping={prevState.mapping}
-          onChange={onPrevMapping}
-          needsManualHint={prevState.needsManual}
-          rawRows={prevState.rows}
-        />
+        <>
+          <ColumnMappingForm
+            title="Previous week — column mapping"
+            headers={prevState.headers}
+            mapping={prevState.mapping}
+            onChange={onPrevMapping}
+            needsManualHint={prevState.needsManual}
+            rawRows={prevState.rows}
+          />
+          <PayableBaselineConfig
+            title="Previous week — payable event baseline (optional)"
+            rawRows={prevState.rows}
+            mapping={prevState.mapping}
+            payableConfig={prevState.payableConfig}
+            onChange={onPrevPayableConfig}
+          />
+        </>
       )}
       {currState?.headers && (
-        <ColumnMappingForm
-          title="Current week — column mapping"
-          headers={currState.headers}
-          mapping={currState.mapping}
-          onChange={onCurrMapping}
-          needsManualHint={currState.needsManual}
-          rawRows={currState.rows}
-        />
+        <>
+          <ColumnMappingForm
+            title="Current week — column mapping"
+            headers={currState.headers}
+            mapping={currState.mapping}
+            onChange={onCurrMapping}
+            needsManualHint={currState.needsManual}
+            rawRows={currState.rows}
+          />
+          <PayableBaselineConfig
+            title="Current week — payable event baseline (optional)"
+            rawRows={currState.rows}
+            mapping={currState.mapping}
+            payableConfig={currState.payableConfig}
+            onChange={onCurrPayableConfig}
+          />
+        </>
       )}
     </section>
   )

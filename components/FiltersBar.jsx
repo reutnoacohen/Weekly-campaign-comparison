@@ -182,7 +182,59 @@ export default function FiltersBar({
       </div>
 
       {(showCountryFilter || showStateFilter) && (
-        <div className="flex flex-col gap-3 border-t border-slate-200 pt-4 md:flex-row md:items-start md:gap-6">
+        <div className="space-y-3 border-t border-slate-200 pt-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  onChange({ ...filters, useGeo: !filters.useGeo })
+                }
+                className={
+                  filters.useGeo
+                    ? 'rounded-md border-2 border-emerald-500 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-900 shadow-sm'
+                    : 'rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 shadow-sm hover:bg-slate-50'
+                }
+                aria-pressed={Boolean(filters.useGeo)}
+              >
+                {filters.useGeo
+                  ? 'Location filter: ON'
+                  : 'Location filter: OFF'}
+              </button>
+              <p className="text-[10px] text-slate-500 sm:max-w-md">
+                {filters.useGeo
+                  ? 'Data is limited to the countries/states you choose below. Turn off to see all locations.'
+                  : 'Geographic choices below are not applied. Click ON to filter by your selections.'}
+              </p>
+            </div>
+            {filters.useGeo && (
+              <div className="shrink-0 text-[10px] text-slate-600">
+                {(() => {
+                  const c = (filters.country || []).length
+                  const s = (filters.state || []).length
+                  if (c === 0 && s === 0) {
+                    return (
+                      <span className="rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-amber-900">
+                        No country/state selected = all locations in data
+                      </span>
+                    )
+                  }
+                  const parts = []
+                  if (c) parts.push(`${c} countr${c === 1 ? 'y' : 'ies'}`)
+                  if (s) parts.push(`${s} state${s === 1 ? '' : 's'}`)
+                  return (
+                    <span className="rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-medium text-emerald-900">
+                      Active: {parts.join(' · ')}
+                    </span>
+                  )
+                })()}
+              </div>
+            )}
+          </div>
+          <div
+            className={`flex flex-col gap-3 md:flex-row md:items-start md:gap-6 ${!filters.useGeo ? 'opacity-60' : ''}`}
+            aria-disabled={!filters.useGeo}
+          >
           {showCountryFilter && (
             <div className="min-w-[12rem] flex-1 md:max-w-xs">
               <GeoMultiSelect
@@ -207,6 +259,7 @@ export default function FiltersBar({
               />
             </div>
           )}
+          </div>
         </div>
       )}
     </div>

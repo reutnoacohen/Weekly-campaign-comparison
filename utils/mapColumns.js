@@ -6,10 +6,12 @@ import {
   isValidEventCountColumn,
   isValidEventNameColumn,
 } from './columnAnalysis.js'
+import { isBaselineKpiEnabled } from './applyPayableBaseline.js'
 
 export const TARGET_FIELDS = [
   'campaignName',
   'mediaSource',
+  'sourceDetail',
   'agency',
   'eventName',
   'attributionType',
@@ -19,6 +21,7 @@ export const TARGET_FIELDS = [
   'payableEventCount',
   'impressions',
   'revenue',
+  'eventRevenue',
   'country',
   'state',
 ]
@@ -27,6 +30,7 @@ export const TARGET_FIELDS = [
 const FIELD_ASSIGN_ORDER = [
   'campaignName',
   'mediaSource',
+  'sourceDetail',
   'agency',
   'attributionType',
   'clicks',
@@ -35,9 +39,10 @@ const FIELD_ASSIGN_ORDER = [
   'payableEventCount',
   'impressions',
   'revenue',
+  'eventName',
+  'eventRevenue',
   'country',
   'state',
-  'eventName',
 ]
 
 const SYNONYMS = {
@@ -53,13 +58,28 @@ const SYNONYMS = {
     'media source',
     'mediasource',
     'media_source',
-    'publisher',
     'source',
     'site id',
     'site_id',
     'channel',
-    'partner',
     'af_prt',
+    'main source',
+  ],
+  sourceDetail: [
+    'source detail',
+    'sourcedetail',
+    'source_detail',
+    'sub source',
+    'subsource',
+    'sub source name',
+    'detail',
+    'specific source',
+    'partner',
+    'publisher',
+    'site name',
+    'partner id',
+    'affiliate',
+    'placement',
   ],
   agency: ['agency', 'agency name', 'partner agency', 'af agency'],
   eventName: [
@@ -137,6 +157,14 @@ const SYNONYMS = {
     'usd revenue',
     'amount',
   ],
+  eventRevenue: [
+    'event revenue',
+    'event_revenue',
+    'event rev',
+    'revenue per event',
+    'per event revenue',
+    'in app event revenue',
+  ],
   country: [
     'country',
     'country code',
@@ -203,7 +231,7 @@ function filterCandidatesForField(field, candidates, rawRows) {
     if (!rawRows?.length) return []
     return candidates.filter((c) => isValidEventNameColumn(rawRows, c.raw))
   }
-  if (field === 'eventCount') {
+  if (field === 'eventCount' || field === 'eventRevenue') {
     if (!rawRows?.length) return candidates
     return candidates.filter((c) => isValidEventCountColumn(rawRows, c.raw))
   }
@@ -291,7 +319,11 @@ export function autoDetectMapping(headers, rawRows = []) {
 
 export function getMappingValidationIssues(rawRows, mapping) {
   if (!mapping || !rawRows?.length) {
-    return { eventNameInvalid: false, eventCountInvalid: false }
+    return {
+      eventNameInvalid: false,
+      eventCountInvalid: false,
+      eventRevenueInvalid: false,
+    }
   }
   const eventNameInvalid = Boolean(
     mapping.eventName && !isValidEventNameColumn(rawRows, mapping.eventName),
@@ -299,7 +331,45 @@ export function getMappingValidationIssues(rawRows, mapping) {
   const eventCountInvalid = Boolean(
     mapping.eventCount && !isValidEventCountColumn(rawRows, mapping.eventCount),
   )
-  return { eventNameInvalid, eventCountInvalid }
+  const eventRevenueInvalid = Boolean(
+    mapping.eventRevenue && !isValidEventCountColumn(rawRows, mapping.eventRevenue),
+  )
+  return { eventNameInvalid, eventCountInvalid, eventRevenueInvalid }
+}
+
+export const DEFAULT_PAYABLE_CONFIG = {
+  useBaseline: false,
+  payableEventName: '',
+  revenueBaseline: '',
+}
+
+/**
+ * Ready to compare: campaign + metrics, or baseline-derived payable when configured.
+ * @param {import('./applyPayableBaseline.js').PayableConfig} [payableConfig]
+ */
+export function isCompareReady(
+  mapping,
+  rawRows = null,
+  payableConfig = DEFAULT_PAYABLE_CONFIG,
+) {
+  if (!mapping?.campaignName) return false
+  if (rawRows?.length) {
+    const { eventNameInvalid, eventCountInvalid, eventRevenueInvalid } =
+      getMappingValidationIssues(rawRows, mapping)
+    if (eventNameInvalid || eventCountInvalid) return false
+    if (isBaselineKpiEnabled(mapping, payableConfig) && eventRevenueInvalid) {
+      return false
+    }
+  }
+  const hasTraditional =
+    Boolean(mapping.clicks) ||
+    Boolean(mapping.installs) ||
+    Boolean(mapping.eventCount) ||
+    Boolean(mapping.payableEventCount)
+  if (hasTraditional) {
+    return isMappingReady(mapping, rawRows)
+  }
+  return isBaselineKpiEnabled(mapping, payableConfig)
 }
 
 /**
@@ -336,8 +406,10 @@ export function buildRowFromMapping(rowObj, mapping) {
     payableEventCount: get('payableEventCount'),
     impressions: get('impressions'),
     revenue: get('revenue'),
+    eventRevenue: get('eventRevenue'),
     country: get('country'),
     state: get('state'),
+    sourceDetail: get('sourceDetail'),
   }
 }
 
